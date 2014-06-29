@@ -5,7 +5,7 @@
 Put code in `Bot.hs`.
 
 ```
-cabal run HOSTNAME XMPPID XMPPPASS XMPPNICK XMPPROOM
+cabal run HOSTNAME XMPPID XMPPPASS XMPPNICK XMPPROOM +RTS -N2
 ```
 
 ## Installation
