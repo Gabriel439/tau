@@ -15,11 +15,16 @@ type Result = Either String String
 type HintCmds = (ThreadId, MVar (Maybe (Hint.InterpreterT IO ())))
 data Cmd = Eval | TypeOf
 
+hintCmd :: forall (m :: * -> *).
+                 Hint.MonadInterpreter m =>
+                 Cmd -> String -> m String
 hintCmd Eval = Hint.eval
 hintCmd TypeOf = Hint.typeOf
 
+funExtensions :: [Extension]
 funExtensions = [NoMonomorphismRestriction, RankNTypes, ScopedTypeVariables, FlexibleInstances, EmptyDataDecls, KindSignatures, BangPatterns, TypeSynonymInstances, TemplateHaskell, Generics, NamedFieldPuns, PatternGuards, MagicHash, TypeFamilies, StandaloneDeriving, TypeOperators, OverloadedStrings, GADTs, DeriveDataTypeable, QuasiQuotes, ViewPatterns, DeriveFunctor, DeriveTraversable, DeriveFoldable, ExtendedDefaultRules]
 
+startHint :: forall a. IO (ThreadId, MVar (Maybe (Hint.InterpreterT IO a)))
 startHint = do
   cmdQueue <- newEmptyMVar
   let hintLoop = Hint.lift (takeMVar cmdQueue) >>= \command -> case command of
@@ -30,6 +35,12 @@ startHint = do
     >> hintLoop)
   return (tid, cmdQueue)
 
+evalHint :: forall (t :: (* -> *) -> * -> *).
+            (Hint.MonadInterpreter (t IO), Hint.MonadTrans t) =>
+            String
+            -> Cmd
+            -> (ThreadId, MVar (Maybe (t IO ())))
+            -> IO (Either String String)
 evalHint msg cmd (tid, cmdQueue) = do
   result <- newEmptyMVar
   void $ forkIO $ do
