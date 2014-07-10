@@ -7,9 +7,8 @@ import Network.Xmpp
 
 import Control.Monad
 import Control.Exception (SomeException, catch)
-import Data.Text (pack, unpack)
+import Data.Text (Text, pack, unpack)
 import Data.String
-import Data.Default
 import Data.IORef
 import System.Log.Logger
 import System.Environment
@@ -19,21 +18,23 @@ import Data.XML.Types (
   , Element(Element), Name(Name), Content(ContentText), Node(NodeContent)
   )
 
+mainLoop :: IORef Conf -> Text -> Session -> IO ()
 mainLoop conf xmpproom sess = do
   msg <- getMessage sess
-  let from = maybe "(anybody)" unpack (resourcepart =<< messageFrom msg)
-  let to = maybe "(anybody)" unpack (resourcepart =<< messageTo msg)
+  let from' = maybe "(anybody)" unpack (resourcepart =<< messageFrom msg)
+  let to' = maybe "(anybody)" unpack (resourcepart =<< messageTo msg)
   let bodyElems = elems "body" msg
   let delayElems = elems "delay" msg -- hipchat delayed messages
   let responder = elems "responder" msg -- so you can't respond to yourself
   when (null delayElems && (not . null) bodyElems && null responder) $ do
     let body = head $ elementText (head bodyElems)
     conf' <- readIORef conf
-    (replies, newConf) <- receiveMessage conf' (unpack xmpproom) from to (unpack body)
+    (replies, newConf) <- receiveMessage conf' (unpack xmpproom) from' to' (unpack body)
     mapM_ (sendReply sess msg) replies
     writeIORef conf newConf
   return ()
 
+main :: IO ()
 main = do
   updateGlobalLogger "Pontarius.Xmpp" $ setLevel DEBUG
   args <- getArgs
@@ -53,11 +54,12 @@ main = do
     Left e -> putStrLn ("XmppFailure: " ++ show e) >> exitWith (ExitFailure 1)
   sendMUCPresence (unpack xmpproom) (unpack xmppnick) sess
   
-  setConnectionClosedHandler (\f _ -> do
-    reconnectNow sess
+  setConnectionClosedHandler (\_ _ -> do
+    _ <- reconnectNow sess
     sendMUCPresence (unpack xmpproom) (unpack xmppnick) sess) sess
   forever (catch (mainLoop conf xmpproom sess) handler)
 
+sendReply :: Session -> Message -> String -> IO ()
 sendReply sess msg content = do
   case answerMessage msg [
     Element "body" [] [
@@ -69,21 +71,25 @@ sendReply sess msg content = do
 handler :: SomeException -> IO ()
 handler = print
 
+elems :: Text -> Message -> [Element]
 elems tagname mes = filter ((== tagname) . nameLocalName . elementName) $
                            (messagePayload mes)
 
+sendMUCPresence :: String -> String -> Session -> IO ()
 sendMUCPresence xmpproom xmppnick sess = do
-  jid <- getJid sess
+  jid' <- getJid sess
   void $ sendPresence (def {
-      presenceFrom = jid
+      presenceFrom = jid'
     , presenceTo = Just (parseJid (xmpproom ++ '/' : xmppnick))
     , presencePayload = [Element "x" [(Name "xmlns" Nothing Nothing, [ContentText "http://jabber.org/protocol/muc"])] []]
     }) sess
 
+getOrElse :: [String] -> Int -> IO Text
 getOrElse xs i =
   if length xs >= i
     then return $ pack $ xs !! i
     else printUsage >> exitWith (ExitFailure 1)
 
+printUsage :: IO ()
 printUsage =
   putStrLn "USAGE: tau HOSTNAME XMPPID XMPPPASS XMPPNICK XMPPROOM"
