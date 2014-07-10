@@ -30,4 +30,4 @@ And you're good to go!
 - XMPPID: `1234_1234@chat.hipchat.com/bot`
 - XMPPPASS: `password`
 - XMPPNICK: `My Name`
-- XMPPROOM: `1234_words`
+- XMPPROOM: `1234_words@conf.hipchat.com`
