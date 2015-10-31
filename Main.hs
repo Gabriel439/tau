@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards   #-}
 module Main where
 
 import Bot
@@ -10,13 +11,12 @@ import Control.Exception (SomeException, catch)
 import Data.Text (Text, pack, unpack)
 import Data.String
 import Data.IORef
-import System.Log.Logger
-import System.Environment
 import System.Exit
 import Data.XML.Types (
     nameLocalName, elementName, elementText
   , Element(Element), Name(Name), Content(ContentText), Node(NodeContent)
   )
+import Turtle (Parser, argText, options)
 
 mainLoop :: IORef Conf -> Text -> Session -> IO ()
 mainLoop conf xmpproom sess = do
@@ -34,16 +34,25 @@ mainLoop conf xmpproom sess = do
     writeIORef conf newConf
   return ()
 
+data Options = Options
+    { hostname :: Text
+    , xmppid   :: Text
+    , xmpppass :: Text
+    , xmppnick :: Text
+    , xmpproom :: Text
+    }
+
+opts :: Parser Options
+opts =  Options
+    <$> argText "host"     "Connect host"
+    <*> argText "id"       "Jabber ID"
+    <*> argText "password" "Password"
+    <*> argText "nickname" "Room Nickname"
+    <*> argText "room"     "XMPP/Jabber room name"
+
 main :: IO ()
 main = do
-  updateGlobalLogger "Pontarius.Xmpp" $ setLevel DEBUG
-  args <- getArgs
-  hostname <- getOrElse args 0
-  
-  xmppid <- getOrElse args 1
-  xmpppass <- getOrElse args 2
-  xmppnick <- getOrElse args 3
-  xmpproom <- getOrElse args 4
+  Options {..} <- options "Haskell-driven HipChat bot" opts
   
   c' <- mkConf
   conf <- newIORef c'
