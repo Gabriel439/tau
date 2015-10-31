@@ -3,40 +3,51 @@
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE OverloadedStrings          #-}
 
-module Hint (
-      UserName(..)
-    , HintCommand(..)
-    , Bot
-    , Code(..)
-    , command
-    , runBot
-    ) where
+{-| This module provides a `Hint` monad which supports per-user interpreter
+    sessions
+-}
 
-import Language.Haskell.Interpreter (Extension(..))
+module HipChat.Bot.Hint (
+    -- * Commands
+      command
+    , runHint
+
+    -- * Types
+    , UserName(..)
+    , Code(..)
+    , HintCommand(..)
+    , Hint
+
+    -- * Re-exports
+    , MonadState(..)
+    , Text
+    ) where
 
 import Control.Concurrent.Async (Async)
 import Control.Concurrent.STM.TMVar (TMVar)
 import Control.Monad (forever)
 import Control.Monad.Catch (catch)
 import Control.Monad.Managed (Managed)
-import Control.Monad.State (MonadState, StateT, evalStateT, get, put)
+import Control.Monad.State (MonadState(..), StateT)
 import Control.Monad.Trans (lift, MonadIO(..))
 import Data.Hashable (Hashable)
 import Data.HashMap.Strict (HashMap)
 import Data.Monoid ((<>))
 import Data.String (IsString)
 import Data.Text (Text)
-import Language.Haskell.Interpreter (InterpreterError(..), OptionVal((:=)))
-import Turtle (err, repr)
+import Language.Haskell.Interpreter
+    (Extension(..), InterpreterError(..), OptionVal((:=)))
 
 import qualified Control.Concurrent.Async     as Async
 import qualified Control.Concurrent.STM       as STM
 import qualified Control.Concurrent.STM.TMVar as TMVar
 import qualified Control.Monad.Managed        as Managed
+import qualified Control.Monad.State          as State
 import qualified Data.HashMap.Strict          as HashMap
 import qualified Data.Text                    as Text
 import qualified Language.Haskell.Interpreter as Hint
 import qualified System.Timeout               as Timeout
+import qualified Turtle
 
 extensions :: [Extension]
 extensions =
@@ -51,39 +62,63 @@ extensions =
     , EmptyDataDecls
     ]
 
+-- | Each interpreter session is associated with a `UserName`
 newtype UserName = UserName { getUserName :: Text }
     deriving (Eq, IsString, Hashable, Show)
 
+-- | The code to evaluate or type-check in the interpreter
 newtype Code = Code { getCode :: Text } deriving (IsString)
 
+-- | Commands that the interpreter accepts
 data HintCommand
     = TypeOf Code
+    -- ^ Request the type of the given `Code`
     | Eval   Code
+    -- ^ Evaluate the given `Code`
     | Reset
+    -- ^ Restart the interpreter session
 
-data BotState s = BotState
+-- | The internal state of the `Hint` `Monad`
+data HintState s = HintState
     { _sessions :: HashMap UserName UserState
+    -- ^ All user sessions
     , _custom   :: s
+    -- ^ Custom user-defined state
     }
 
+-- | The state of the interpreter associated with a given `UserName`
 data UserState = UserState
     { _async    :: Async InterpreterError
+    -- ^ Reference to the thread running the user's interpreter session
     , _inTMVar  :: TMVar HintCommand
+    -- ^ Send commands to the interpreter via this `TMVar`
     , _outTMVar :: TMVar [Text]
+    -- ^ Receive responses from the interpreter via this `TMVar`
     }
 
-newtype Bot s a = Bot { unBot :: StateT (BotState s) Managed a }
+{-| Build primitive `Hint` commands using:
+
+    * `command` - execute an interpreter command
+    * `liftIO`  - execute an arbitrary `IO` action
+    * `get` / `put` - read and write user-defined state
+
+    Combine these `Hint` commands using @do@ notation
+
+    Consume `Hint` commands using `runHint`
+-}
+newtype Hint s a = Hint { unHint :: StateT (HintState s) Managed a }
     deriving (Functor, Applicative, Monad, MonadIO)
 
-instance MonadState s (Bot s) where
-    get = Bot (do
-        BotState _ s <- get
+instance MonadState s (Hint s) where
+    get = Hint (do
+        HintState _ s <- get
         return s )
 
-    put s = Bot (do
-        BotState m _ <- get
-        put (BotState m s) )
+    put s = Hint (do
+        HintState m _ <- get
+        put (HintState m s) )
 
+-- | Pretty print an error message
 handler :: Monad m => InterpreterError -> m Text
 handler (UnknownError msg ) = return ("Unexpected error: "  <> Text.pack msg)
 handler (NotAllowed   msg ) = return ("Permission denied: " <> Text.pack msg)
@@ -93,11 +128,16 @@ handler (WontCompile  msgs) = return
     <>  Text.pack (unlines (map Hint.errMsg msgs))
     )
 
+-- | > unpacked :: Lens' Text String
 unpacked :: Functor f => (String -> f String) -> (Text -> f Text)
 unpacked k txt = fmap Text.pack (k (Text.unpack txt))
 
-initUser :: UserName -> Bot s UserState
-initUser userName = Bot (do
+{-| Initialize a new interpreter for a given user
+
+    This does not take care of disposing any prior sessions for that user
+-}
+initUser :: UserName -> Hint s UserState
+initUser userName = Hint (do
     cmdTMVar <- liftIO (STM.atomically TMVar.newEmptyTMVar)
     resTMVar <- liftIO (STM.atomically TMVar.newEmptyTMVar)
 
@@ -127,17 +167,18 @@ initUser userName = Bot (do
                 Left  e -> return e
                 Right v -> v
 
-    BotState m s <- get
-    a            <- lift (Managed.managed (Async.withAsync io))
+    HintState m s <- get
+    a             <- lift (Managed.managed (Async.withAsync io))
     let userState = UserState a cmdTMVar resTMVar
-    put (BotState (HashMap.insert userName userState m) s)
+    put (HintState (HashMap.insert userName userState m) s)
     return userState )
 
-command :: UserName -> HintCommand -> Bot s [Text]
-command userName hintCommand = Bot (do
-    BotState m _                  <- get
+-- | Run an interpreter command for the given user
+command :: UserName -> HintCommand -> Hint s [Text]
+command userName hintCommand = Hint (do
+    HintState m _                 <- get
     UserState a cmdTMVar resTMVar <- case HashMap.lookup userName m of
-        Nothing -> unBot (initUser userName)
+        Nothing -> unHint (initUser userName)
         Just us -> return us
     let writeTransaction = do
             x <- Async.pollSTM a
@@ -155,8 +196,8 @@ command userName hintCommand = Bot (do
     x <- liftIO (STM.atomically writeTransaction)
     case x of
         Left  e -> do
-            err e
-            _ <- unBot (initUser userName)
+            Turtle.err e
+            _ <- unHint (initUser userName)
             return []
         Right () -> do
             let readTransaction = do
@@ -174,15 +215,15 @@ command userName hintCommand = Bot (do
                             return (Left (errMsg e))
             y <- liftIO (Timeout.timeout 1000000 (STM.atomically readTransaction))
             case y of
-                -- Interpreter thread took more than 1 second to compute the result
+                -- Interpreter thread took more than 1 second to compute result
                 Nothing           -> do
                     liftIO (Async.cancel a)
-                    _ <- unBot (initUser userName)
+                    _ <- unHint (initUser userName)
                     return []
                 -- Interpreter thread died with an exception
                 Just (Left  e   ) -> do
-                    err e
-                    _ <- unBot (initUser userName)
+                    Turtle.err e
+                    _ <- unHint (initUser userName)
                     return []
                 Just (Right txts) -> do
                     return txts )
@@ -191,9 +232,14 @@ command userName hintCommand = Bot (do
     errMsg e =
         "Warning: A user's interpreter thread threw an exception\n\
         \n\
-        \User     : " <> repr userName <> "\n\
-        \Exception: " <> repr e
+        \User     : " <> Turtle.repr userName <> "\n\
+        \Exception: " <> Turtle.repr e
 
-runBot :: s -> Bot s () -> IO ()
-runBot s b =
-    Managed.runManaged (evalStateT (unBot b) (BotState HashMap.empty s))
+{-| Execute `Hint` instructions by providing a starting value for the
+    user-defined state
+
+    If you don't use user-defined state, just supply @()@ as the starting value
+-}
+runHint :: s -> Hint s () -> IO ()
+runHint s b =
+    Managed.runManaged (State.evalStateT (unHint b) (HintState HashMap.empty s))

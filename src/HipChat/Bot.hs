@@ -1,15 +1,27 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
-module Main where
 
-import Bot
-import Hint
+module HipChat.Bot (
+    -- * Commands
+      runHipChat
+    , command
+    , liftIO
+
+    -- * Types
+    , UserName(..)
+    , Code(..)
+    , HintCommand(..)
+    , Hint
+
+    -- * Re-exports
+    , MonadState(..)
+    , Text
+    ) where
 
 import Control.Exception (Exception, SomeException, catch, throwIO)
 import Control.Monad (when, forever)
 import Control.Monad.Trans (liftIO)
 import Data.Monoid ((<>))
-import Data.Text (Text)
 import Data.XML.Types
     ( elementText
     , nameLocalName
@@ -17,6 +29,7 @@ import Data.XML.Types
     , Content(ContentText)
     , Node(NodeContent)
     )
+import HipChat.Bot.Hint
 import Network.Xmpp
     ( Message(..)
     , Presence(..)
@@ -42,10 +55,10 @@ elems :: Text -> Message -> [Element]
 elems tagname msg =
     filter ((== tagname) . nameLocalName . elementName) (messagePayload msg)
 
-mainLoop :: Session -> Bot s ()
-mainLoop sess = do
+mainLoop :: Session -> (UserName -> Text -> Hint s [Text]) -> Hint s ()
+mainLoop sess handleMessage = do
     msg <- liftIO (getMessage sess)
-    let from' = maybe "(anybody)" id (resourcepart =<< messageFrom msg)
+    let from = maybe "(anybody)" id (resourcepart =<< messageFrom msg)
     let bodyElems  = elems "body"      msg
     let delayElems = elems "delay"     msg -- hipchat delayed messages
     let responder  = elems "responder" msg -- so you can't respond to yourself
@@ -53,9 +66,9 @@ mainLoop sess = do
         [bodyElem] -> do
             when (null delayElems && null responder) $ do
                 let body = head (elementText bodyElem)
-                replies <- receiveMessage from' body
+                replies <- handleMessage (UserName from) body
                 mapM_ (liftIO . sendReply sess msg) replies
-        _      -> liftIO (err
+        _          -> liftIO (err
             ("Warning: Unexpected number of message body elements\n\
              \n\
              \Message body elements: " <> repr bodyElems <> "\n\
@@ -75,11 +88,12 @@ opts =  Options
     <$> argText "host"     "Connect host"
     <*> argText "id"       "Jabber ID"
     <*> argText "password" "Password"
-    <*> argText "nickname" "Nickname"
-    <*> argText "room"     "XMPP/Jabber room name"
+    <*> argText "nickname" "Room nickname"
+    <*> argText "room"     "Room (XMPP/Jabber name)"
 
-main :: IO ()
-main = do
+-- | Run a Hip Chat bot
+runHipChat :: s -> (UserName -> Text -> Hint s [Text]) -> IO ()
+runHipChat initialState handleMessage = do
     Options {..} <- options "Haskell-driven HipChat bot" opts
   
     sess <- throws (session (Text.unpack host) (simpleAuth xmppid xmpppass) def)
@@ -89,7 +103,7 @@ main = do
     setConnectionClosedHandler (\_ _ -> do
         throws_ (reconnectNow sess)
         sendMUCPresence xmpproom xmppnick sess) sess
-    forever (catch (runBot () (mainLoop sess)) handler)
+    forever (catch (runHint initialState (mainLoop sess handleMessage)) handler)
 
 throws :: Exception e => IO (Either e a) -> IO a
 throws io = do
