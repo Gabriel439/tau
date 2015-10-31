@@ -25,13 +25,13 @@ import Network.Xmpp
     , getJid
     , getMessage
     , parseJid
-    , plain
     , reconnectNow
     , resourcepart
     , sendMessage
     , sendPresence
     , session
     , setConnectionClosedHandler
+    , simpleAuth
     )
 import Turtle (Parser, argText, err, options, repr)
 
@@ -42,7 +42,7 @@ mainLoop conf xmpproom sess = do
     let to'   = maybe "(anybody)" unpack (resourcepart =<< messageTo   msg)
     let bodyElems  = elems "body"      msg
     let delayElems = elems "delay"     msg -- hipchat delayed messages
-    let responder  = elems "responder" msg -- so you can't respond to yourself
+    let responder  = [] -- elems "responder" msg -- so you can't respond to yourself
     case bodyElems of
         [bodyElem] -> do
             when (null delayElems && null responder) $ do
@@ -89,7 +89,7 @@ main = do
     sess <- throws
         (session
             (unpack host)
-            (Just (\_ -> ([plain xmppid Nothing xmpppass]), Nothing))
+            (simpleAuth xmppid xmpppass)
             def )
 
     sendMUCPresence (unpack xmpproom) (unpack xmppnick) sess
