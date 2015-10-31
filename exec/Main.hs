@@ -1,15 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Main where
-
 import Control.Applicative ((<|>))
 import HipChat.Bot
 import Turtle (Pattern, chars, match)
 
 parseMessage :: Pattern HintCommand
 parseMessage
-    =   fmap (Eval   . Code) ("> "       *> chars)
-    <|> fmap (TypeOf . Code) ("> :type " *> chars)
+    =   fmap Eval   ("> "       *> chars)
+    <|> fmap TypeOf ("> :type " *> chars)
 
 handleMessage :: UserName -> Text -> Hint s [Text]
 handleMessage userName msg = case match parseMessage msg of
@@ -17,4 +15,6 @@ handleMessage userName msg = case match parseMessage msg of
     _     -> return []
 
 main :: IO ()
-main = runHipChat () handleMessage
+main = do
+    o <- options "Haskell-driven HipChat bot" opts
+    runHipChat o () handleMessage

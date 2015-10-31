@@ -14,7 +14,6 @@ module HipChat.Bot.Hint (
 
     -- * Types
     , UserName(..)
-    , Code(..)
     , HintCommand(..)
     , Hint
 
@@ -64,17 +63,17 @@ extensions =
 
 -- | Each interpreter session is associated with a `UserName`
 newtype UserName = UserName { getUserName :: Text }
-    deriving (Eq, IsString, Hashable, Show)
+    deriving (Eq, IsString, Hashable)
 
--- | The code to evaluate or type-check in the interpreter
-newtype Code = Code { getCode :: Text } deriving (IsString)
+instance Show UserName where
+    show (UserName txt) = show txt
 
 -- | Commands that the interpreter accepts
 data HintCommand
-    = TypeOf Code
-    -- ^ Request the type of the given `Code`
-    | Eval   Code
-    -- ^ Evaluate the given `Code`
+    = TypeOf Text
+    -- ^ Request the type of the given expression
+    | Eval   Text
+    -- ^ Evaluate the given expression
     | Reset
     -- ^ Restart the interpreter session
 
@@ -124,7 +123,7 @@ handler (UnknownError msg ) = return ("Unexpected error: "  <> Text.pack msg)
 handler (NotAllowed   msg ) = return ("Permission denied: " <> Text.pack msg)
 handler (GhcException msg ) = return ("Internal error: "    <> Text.pack msg)
 handler (WontCompile  msgs) = return
-    (   "I could not compile your program:\n"
+    (   "Compile error:\n\n"
     <>  Text.pack (unlines (map Hint.errMsg msgs))
     )
 
@@ -153,10 +152,10 @@ initUser userName = Hint (do
                 forever (do
                     cmd <- liftIO (STM.atomically (TMVar.takeTMVar cmdTMVar))
                     txts <- case cmd of
-                        TypeOf (Code txt) -> do
+                        TypeOf txt -> do
                             txt' <- unpacked Hint.typeOf txt `catch` handler
                             return [txt']
-                        Eval   (Code txt) -> do
+                        Eval   txt -> do
                             txt' <- unpacked Hint.eval   txt `catch` handler
                             return [txt']
                         Reset             -> do
@@ -231,7 +230,7 @@ command userName hintCommand = Hint (do
     errMsg :: Show e => e -> Text
     errMsg e =
         "Warning: A user's interpreter thread threw an exception\n\
-        \n\
+        \\n\
         \User     : " <> Turtle.repr userName <> "\n\
         \Exception: " <> Turtle.repr e
 

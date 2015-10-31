@@ -1,26 +1,51 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
 
+-- | Example usage:
+-- 
+-- > {-# LANGUAGE OverloadedStrings #-}
+-- > 
+-- > import Control.Applicative ((<|>))
+-- > import HipChat.Bot
+-- > import Turtle (Pattern, chars, match)
+-- > 
+-- > parseMessage :: Pattern HintCommand
+-- > parseMessage
+-- >     =   fmap Eval   ("> "       *> chars)
+-- >     <|> fmap TypeOf ("> :type " *> chars)
+-- >     
+-- > handleMessage :: UserName -> Text -> Hint s [Text]
+-- > handleMessage userName msg = case match parseMessage msg of
+-- >     cmd:_ -> command userName cmd
+-- >     _     -> return []
+-- >     
+-- > main :: IO ()
+-- > main = do
+-- >     o <- options "Haskell-driven HipChat bot" opts
+-- >     runHipChat o () handleMessage
+
 module HipChat.Bot (
     -- * Commands
       runHipChat
     , command
-    , liftIO
+    , opts
+    , options
 
     -- * Types
+    , Options(..)
     , UserName(..)
-    , Code(..)
     , HintCommand(..)
     , Hint
 
     -- * Re-exports
     , MonadState(..)
+    , MonadIO(..)
     , Text
     ) where
 
 import Control.Exception (Exception, SomeException, catch, throwIO)
 import Control.Monad (when, forever)
-import Control.Monad.Trans (liftIO)
+import Control.Monad.Trans (MonadIO(..))
 import Data.Monoid ((<>))
 import Data.XML.Types
     ( elementText
@@ -70,19 +95,26 @@ mainLoop sess handleMessage = do
                 mapM_ (liftIO . sendReply sess msg) replies
         _          -> liftIO (err
             ("Warning: Unexpected number of message body elements\n\
-             \n\
+             \\n\
              \Message body elements: " <> repr bodyElems <> "\n\
              \Expected # of elements: 1\n\
              \Actual   # of elements: " <> repr (length bodyElems) ) )
 
+-- | Hipchat connection options
 data Options = Options
     { host     :: Text
+    -- ^ Connect host
     , xmppid   :: Text
+    -- ^ Jabber ID
     , xmpppass :: Text
+    -- ^ Password
     , xmppnick :: Text
+    -- ^ Room nickname
     , xmpproom :: Text
+    -- ^ Room (XMPP/Jabber name)
     }
 
+-- | Parser for command-line options
 opts :: Parser Options
 opts =  Options
     <$> argText "host"     "Connect host"
@@ -92,10 +124,8 @@ opts =  Options
     <*> argText "room"     "Room (XMPP/Jabber name)"
 
 -- | Run a Hip Chat bot
-runHipChat :: s -> (UserName -> Text -> Hint s [Text]) -> IO ()
-runHipChat initialState handleMessage = do
-    Options {..} <- options "Haskell-driven HipChat bot" opts
-  
+runHipChat :: Options -> s -> (UserName -> Text -> Hint s [Text]) -> IO ()
+runHipChat (Options {..}) initialState handleMessage = do
     sess <- throws (session (Text.unpack host) (simpleAuth xmppid xmpppass) def)
 
     sendMUCPresence xmpproom xmppnick sess
@@ -129,7 +159,7 @@ sendReply sess msg content = do
         Just answer -> throws (sendMessage answer sess)
         Nothing     -> err
             ("Warning: Can not reply to a message missing a `from:` field\n\
-             \n\
+             \\n\
              \Message: " <> repr msg )
 
 handler :: SomeException -> IO ()
@@ -154,6 +184,6 @@ sendMUCPresence xmpproom xmppnick sess = do
             throws (sendPresence presence sess)
         Nothing     -> die
             ("Error: Invalid room or nickname\n\
-             \n\
+             \\n\
              \Room    : " <> repr xmpproom <> "\n\
              \Nickname: " <> repr xmppnick )
