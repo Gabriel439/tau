@@ -1,22 +1,27 @@
-name:                tau
-version:             0.1.0.0
--- synopsis:            
--- description:         
-license:             BSD3
-license-file:        LICENSE
-author:              Maxwell Swadling
-maintainer:          maxwellswadling@gmail.com
--- copyright:           
-category:            Network
-build-type:          Simple
--- extra-source-files:  
-cabal-version:       >=1.10
+name:          tau
+version:       1.0.0
+synopsis:      A HipChat bot programmable using Haskell
+description:   Program a HipChat bot using Haskell code
+license:       BSD3
+license-file:  LICENSE
+author:        Maxwell Swadling
+maintainer:    maxwellswadling@gmail.com
+category:      Network
+build-type:    Simple
+cabal-version: >= 1.10
 
 executable tau
-  main-is:             Main.hs
-  other-modules:       Bot, Hint
-  -- other-extensions:    
-  build-depends:       base >=4.7 && <4.9, data-default, hslogger, pontarius-xmpp == 0.4.0.2, xml-types, text, hint, exceptions, extensible-exceptions
-  -- hs-source-dirs:      
-  ghc-options:         -threaded
-  default-language:    Haskell2010
+  main-is:          Main.hs
+  other-modules:    Bot, Hint
+  build-depends:    base                  >= 4.7     && < 4.9
+                  , data-default          >= 0.5.3   && < 0.6
+                  , exceptions            >= 0.8.0.2 && < 0.9
+                  , extensible-exceptions >= 0.1.1.4 && < 0.2
+                  , hint                  >= 0.4.2.3 && < 0.5
+                  , hslogger              >= 1.2.9   && < 1.3
+                  , turtle                >= 1.2.2   && < 1.3
+                  , pontarius-xmpp        >= 0.4.5   && < 0.5
+                  , text                                < 1.3
+                  , xml-types             >= 0.3.6   && < 0.4
+  ghc-options:      -threaded -O2 -Wall
+  default-language: Haskell2010
