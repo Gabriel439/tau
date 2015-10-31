@@ -8,6 +8,7 @@ import Control.Monad
 import Control.Monad.Catch
 import Control.Concurrent
 import Control.Exception.Extensible (ErrorCall(..))
+import Data.Text (Text, unpack)
 import qualified Language.Haskell.Interpreter as Hint
 import Language.Haskell.Interpreter (Extension(..))
 
@@ -22,7 +23,33 @@ hintCmd Eval = Hint.eval
 hintCmd TypeOf = Hint.typeOf
 
 funExtensions :: [Extension]
-funExtensions = [NoMonomorphismRestriction, RankNTypes, ScopedTypeVariables, FlexibleInstances, EmptyDataDecls, KindSignatures, BangPatterns, TypeSynonymInstances, TemplateHaskell, Generics, NamedFieldPuns, PatternGuards, MagicHash, TypeFamilies, StandaloneDeriving, TypeOperators, OverloadedStrings, GADTs, DeriveDataTypeable, QuasiQuotes, ViewPatterns, DeriveFunctor, DeriveTraversable, DeriveFoldable, ExtendedDefaultRules]
+funExtensions =
+    [ NoMonomorphismRestriction
+    , RankNTypes
+    , ScopedTypeVariables
+    , FlexibleInstances
+    , EmptyDataDecls
+    , KindSignatures
+    , BangPatterns
+    , TypeSynonymInstances
+    , TemplateHaskell
+    , Generics
+    , NamedFieldPuns
+    , PatternGuards
+    , MagicHash
+    , TypeFamilies
+    , StandaloneDeriving
+    , TypeOperators
+    , OverloadedStrings
+    , GADTs
+    , DeriveDataTypeable
+    , QuasiQuotes
+    , ViewPatterns
+    , DeriveFunctor
+    , DeriveTraversable
+    , DeriveFoldable
+    , ExtendedDefaultRules
+    ]
 
 startHint :: forall a. IO (ThreadId, MVar (Maybe (Hint.InterpreterT IO a)))
 startHint = do
@@ -37,7 +64,7 @@ startHint = do
 
 evalHint :: forall (t :: (* -> *) -> * -> *).
             (Hint.MonadInterpreter (t IO), Hint.MonadTrans t) =>
-            String
+               Text
             -> Cmd
             -> (ThreadId, MVar (Maybe (t IO ())))
             -> IO (Either String String)
@@ -46,7 +73,7 @@ evalHint msg cmd (tid, cmdQueue) = do
   void $ forkIO $ do
     putMVar cmdQueue $ Just $ do
       res' <- (do
-        !res <- (hintCmd cmd) msg
+        !res <- hintCmd cmd (unpack msg)
         return (Right res))
                   `catch` (return . Left . pprError)
                   `catch` (return . Left . (show :: SomeException -> String))

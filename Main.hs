@@ -39,11 +39,11 @@ elems :: Text -> Message -> [Element]
 elems tagname msg =
     filter ((== tagname) . nameLocalName . elementName) (messagePayload msg)
 
-mainLoop :: IORef Conf -> Text -> Session -> IO ()
+-- mainLoop :: IORef HintCmds -> Text -> Session -> IO ()
 mainLoop conf xmpproom sess = do
     msg <- getMessage sess
-    let from' = maybe "(anybody)" unpack (resourcepart =<< messageFrom msg)
-    let to'   = maybe "(anybody)" unpack (resourcepart =<< messageTo   msg)
+    let from' = maybe "(anybody)" id (resourcepart =<< messageFrom msg)
+    let to'   = maybe "(anybody)" id (resourcepart =<< messageTo   msg)
     let bodyElems  = elems "body"      msg
     let delayElems = elems "delay"     msg -- hipchat delayed messages
     let responder  = elems "responder" msg -- so you can't respond to yourself
@@ -54,18 +54,18 @@ mainLoop conf xmpproom sess = do
                 conf' <- readIORef conf
                 (replies, newConf) <- receiveMessage
                     conf'
-                    (unpack xmpproom)
+                    xmpproom
                     from'
                     to'
-                    (unpack body)
+                    body
                 mapM_ (sendReply sess msg) (map pack replies)
                 writeIORef conf newConf
-        _      ->
-            err ("Error: Unexpected number of message body elements\n\
-                 \n\
-                 \Message body elements: " <> repr bodyElems <> "\n\
-                 \Expected # of elements: 1\n\
-                 \Actual   # of elements: " <> repr (length bodyElems) )
+        _      -> err
+            ("Warning: Unexpected number of message body elements\n\
+             \n\
+             \Message body elements: " <> repr bodyElems <> "\n\
+             \Expected # of elements: 1\n\
+             \Actual   # of elements: " <> repr (length bodyElems) )
 
 data Options = Options
     { host     :: Text
