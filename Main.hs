@@ -3,12 +3,13 @@
 module Main where
 
 import Bot
+import Hint
 
-import Control.Monad (when, forever)
 import Control.Exception (Exception, SomeException, catch, throwIO)
+import Control.Monad (when, forever)
+import Control.Monad.Trans (liftIO)
 import Data.Monoid ((<>))
-import Data.Text (Text, pack, unpack)
-import Data.IORef
+import Data.Text (Text)
 import Data.XML.Types
     ( elementText
     , nameLocalName
@@ -35,15 +36,16 @@ import Network.Xmpp
     )
 import Turtle (Parser, argText, die, err, options, repr)
 
+import qualified Data.Text as Text
+
 elems :: Text -> Message -> [Element]
 elems tagname msg =
     filter ((== tagname) . nameLocalName . elementName) (messagePayload msg)
 
--- mainLoop :: IORef HintCmds -> Text -> Session -> IO ()
-mainLoop conf xmpproom sess = do
-    msg <- getMessage sess
+mainLoop :: Session -> Bot s ()
+mainLoop sess = do
+    msg <- liftIO (getMessage sess)
     let from' = maybe "(anybody)" id (resourcepart =<< messageFrom msg)
-    let to'   = maybe "(anybody)" id (resourcepart =<< messageTo   msg)
     let bodyElems  = elems "body"      msg
     let delayElems = elems "delay"     msg -- hipchat delayed messages
     let responder  = elems "responder" msg -- so you can't respond to yourself
@@ -51,21 +53,14 @@ mainLoop conf xmpproom sess = do
         [bodyElem] -> do
             when (null delayElems && null responder) $ do
                 let body = head (elementText bodyElem)
-                conf' <- readIORef conf
-                (replies, newConf) <- receiveMessage
-                    conf'
-                    xmpproom
-                    from'
-                    to'
-                    body
-                mapM_ (sendReply sess msg) (map pack replies)
-                writeIORef conf newConf
-        _      -> err
+                replies <- receiveMessage from' body
+                mapM_ (liftIO . sendReply sess msg) replies
+        _      -> liftIO (err
             ("Warning: Unexpected number of message body elements\n\
              \n\
              \Message body elements: " <> repr bodyElems <> "\n\
              \Expected # of elements: 1\n\
-             \Actual   # of elements: " <> repr (length bodyElems) )
+             \Actual   # of elements: " <> repr (length bodyElems) ) )
 
 data Options = Options
     { host     :: Text
@@ -87,17 +82,14 @@ main :: IO ()
 main = do
     Options {..} <- options "Haskell-driven HipChat bot" opts
   
-    c'   <- mkConf
-    conf <- newIORef c'
-  
-    sess <- throws (session (unpack host) (simpleAuth xmppid xmpppass) def)
+    sess <- throws (session (Text.unpack host) (simpleAuth xmppid xmpppass) def)
 
     sendMUCPresence xmpproom xmppnick sess
   
     setConnectionClosedHandler (\_ _ -> do
         throws_ (reconnectNow sess)
         sendMUCPresence xmpproom xmppnick sess) sess
-    forever (catch (mainLoop conf xmpproom sess) handler)
+    forever (catch (runBot () (mainLoop sess)) handler)
 
 throws :: Exception e => IO (Either e a) -> IO a
 throws io = do
