@@ -6,7 +6,7 @@ This is both a library and an example executable.
 
 To install and run the executable, run these commands:
 
-```
+```bash
 $ stack install --install-ghc
 $ ~/.local/bin/tau --help
 Haskell-driven XMPP bot
