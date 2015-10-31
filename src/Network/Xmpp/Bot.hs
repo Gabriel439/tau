@@ -6,7 +6,7 @@
 -- > {-# LANGUAGE OverloadedStrings #-}
 -- > 
 -- > import Control.Applicative ((<|>))
--- > import HipChat.Bot
+-- > import Network.Xmpp.Bot
 -- > import Turtle (Pattern, chars, match)
 -- > 
 -- > parseMessage :: Pattern HintCommand
@@ -14,19 +14,19 @@
 -- >     =   fmap Eval   ("> "       *> chars)
 -- >     <|> fmap TypeOf ("> :type " *> chars)
 -- >     
--- > handleMessage :: UserName -> Text -> Hint s [Text]
--- > handleMessage userName msg = case match parseMessage msg of
--- >     cmd:_ -> command userName cmd
+-- > handleMessage :: UserName -> Message -> Hint s [Text]
+-- > handleMessage _ (Message msg) = case match parseMessage msg of
+-- >     cmd:_ -> command cmd
 -- >     _     -> return []
 -- >     
 -- > main :: IO ()
 -- > main = do
--- >     o <- options "Haskell-driven HipChat bot" opts
--- >     runHipChat o () handleMessage
+-- >     o <- options "Haskell-driven XMPP bot" opts
+-- >     runXmpp o () handleMessage
 
-module HipChat.Bot (
+module Network.Xmpp.Bot (
     -- * Commands
-      runHipChat
+      runXmpp
     , command
     , opts
     , options
@@ -34,6 +34,7 @@ module HipChat.Bot (
     -- * Types
     , Options(..)
     , UserName(..)
+    , Message(..)
     , HintCommand(..)
     , Hint
 
@@ -54,15 +55,12 @@ import Data.XML.Types
     , Content(ContentText)
     , Node(NodeContent)
     )
-import HipChat.Bot.Hint
 import Network.Xmpp
-    ( Message(..)
-    , Presence(..)
+    ( Presence(..)
     , Session
     , answerMessage
     , def
     , getJid
-    , getMessage
     , jidFromTexts
     , reconnectNow
     , resourcepart
@@ -72,18 +70,20 @@ import Network.Xmpp
     , setConnectionClosedHandler
     , simpleAuth
     )
+import Network.Xmpp.Bot.Hint
 import Turtle (Parser, argText, die, err, options, repr)
 
-import qualified Data.Text as Text
+import qualified Data.Text    as Text
+import qualified Network.Xmpp as Xmpp
 
-elems :: Text -> Message -> [Element]
+elems :: Text -> Xmpp.Message -> [Element]
 elems tagname msg =
-    filter ((== tagname) . nameLocalName . elementName) (messagePayload msg)
+    filter ((== tagname) . nameLocalName . elementName) (Xmpp.messagePayload msg)
 
-mainLoop :: Session -> (UserName -> Text -> Hint s [Text]) -> Hint s ()
+mainLoop :: Session -> (UserName -> Message -> Hint s [Message]) -> Hint s ()
 mainLoop sess handleMessage = do
-    msg <- liftIO (getMessage sess)
-    let from = maybe "(anybody)" id (resourcepart =<< messageFrom msg)
+    msg <- liftIO (Xmpp.getMessage sess)
+    let from = maybe "(anybody)" id (resourcepart =<< Xmpp.messageFrom msg)
     let bodyElems  = elems "body"      msg
     let delayElems = elems "delay"     msg -- hipchat delayed messages
     let responder  = elems "responder" msg -- so you can't respond to yourself
@@ -91,8 +91,8 @@ mainLoop sess handleMessage = do
         [bodyElem] -> do
             when (null delayElems && null responder) $ do
                 let body = head (elementText bodyElem)
-                replies <- handleMessage (UserName from) body
-                mapM_ (liftIO . sendReply sess msg) replies
+                replies <- handleMessage (UserName from) (Message body)
+                mapM_ (liftIO . sendReply sess msg . getMessage) replies
         _          -> liftIO (err
             ("Warning: Unexpected number of message body elements\n\
              \\n\
@@ -123,9 +123,9 @@ opts =  Options
     <*> argText "nickname" "Room nickname"
     <*> argText "room"     "Room (XMPP/Jabber name)"
 
--- | Run a Hip Chat bot
-runHipChat :: Options -> s -> (UserName -> Text -> Hint s [Text]) -> IO ()
-runHipChat (Options {..}) initialState handleMessage = do
+-- | Run an Xmpp bot
+runXmpp :: Options -> s -> (UserName -> Message -> Hint s [Message]) -> IO ()
+runXmpp (Options {..}) initialState handleMessage = do
     sess <- throws (session (Text.unpack host) (simpleAuth xmppid xmpppass) def)
 
     sendMUCPresence xmpproom xmppnick sess
@@ -148,7 +148,7 @@ throws_ io = throws (fmap f io)
     f (Just e ) = Left  e
     f  Nothing  = Right ()
 
-sendReply :: Session -> Message -> Text -> IO ()
+sendReply :: Session -> Xmpp.Message -> Text -> IO ()
 sendReply sess msg content = do
     let element = Element
             { elementName = "body"

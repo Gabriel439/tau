@@ -3,17 +3,20 @@
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE OverloadedStrings          #-}
 
-{-| This module provides a `Hint` monad which supports per-user interpreter
-    sessions
+{-| This module provides a `Hint` monad which (under the hood) supports per-user
+    interpreter sessions.  Unfortunately, GHC's API is not thread-safe and does
+    not support multiple concurrent interpreters so for now the API only exposes
+    support for a single-user session.
 -}
 
-module HipChat.Bot.Hint (
+module Network.Xmpp.Bot.Hint (
     -- * Commands
       command
     , runHint
 
     -- * Types
     , UserName(..)
+    , Message(..)
     , HintCommand(..)
     , Hint
 
@@ -61,12 +64,15 @@ extensions =
     , EmptyDataDecls
     ]
 
--- | Each interpreter session is associated with a `UserName`
+-- | The XMPP user that sent the message
 newtype UserName = UserName { getUserName :: Text }
-    deriving (Eq, IsString, Hashable)
+    deriving (Eq, Hashable, IsString)
 
 instance Show UserName where
     show (UserName txt) = show txt
+
+-- | A message that the XMPP bot sends or receives
+newtype Message = Message { getMessage :: Text }
 
 -- | Commands that the interpreter accepts
 data HintCommand
@@ -142,7 +148,10 @@ initUser userName = Hint (do
 
     let reset = do
             Hint.reset
-            Hint.set [Hint.languageExtensions := extensions]
+            Hint.set
+                [ Hint.languageExtensions      := extensions
+                , Hint.installedModulesInScope := False
+                ]
             Hint.setImports ["Prelude"]
 
     let io :: IO InterpreterError
@@ -173,8 +182,8 @@ initUser userName = Hint (do
     return userState )
 
 -- | Run an interpreter command for the given user
-command :: UserName -> HintCommand -> Hint s [Text]
-command userName hintCommand = Hint (do
+command :: HintCommand -> Hint s [Message]
+command hintCommand = Hint (do
     HintState m _                 <- get
     UserState a cmdTMVar resTMVar <- case HashMap.lookup userName m of
         Nothing -> unHint (initUser userName)
@@ -225,14 +234,20 @@ command userName hintCommand = Hint (do
                     _ <- unHint (initUser userName)
                     return []
                 Just (Right txts) -> do
-                    return txts )
+                    return (map Message txts) )
   where
+    -- Replace with this a new parameter to the `command` function once GHC's
+    -- interpreter API supports multiple concurrent sessions
+    userName :: UserName
+    userName = "ghci"
+
     errMsg :: Show e => e -> Text
     errMsg e =
         "Warning: A user's interpreter thread threw an exception\n\
         \\n\
         \User     : " <> Turtle.repr userName <> "\n\
         \Exception: " <> Turtle.repr e
+
 
 {-| Execute `Hint` instructions by providing a starting value for the
     user-defined state

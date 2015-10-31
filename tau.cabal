@@ -1,7 +1,7 @@
 name:          tau
 version:       1.0.0
-synopsis:      A HipChat bot programmable using Haskell
-description:   Program a HipChat bot using Haskell code
+synopsis:      An XMPP bot programmable using Haskell
+description:   Program an XMPP bot using Haskell code
 license:       BSD3
 license-file:  LICENSE
 author:        Maxwell Swadling
@@ -12,8 +12,8 @@ cabal-version: >= 1.10
 
 library
     hs-source-dirs:   src
-    exposed-modules:  HipChat.Bot
-                    , HipChat.Bot.Hint
+    exposed-modules:  Network.Xmpp.Bot
+                    , Network.Xmpp.Bot.Hint
     build-depends:    base                  >= 4.7     && < 4.9
                     , async                 >= 2.0.0.0 && < 2.1
                     , data-default          >= 0.5.3   && < 0.6

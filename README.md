@@ -2,32 +2,58 @@
 
 *The simple XMPP bot.*
 
-Put code in `Bot.hs`.
+This is both a library and an example executable.
+
+To install and run the executable, run these commands:
 
 ```
-cabal run HOSTNAME XMPPID XMPPPASS XMPPNICK XMPPROOM +RTS -N2
+$ stack install --install-ghc
+$ ~/.local/bin/tau --help
+Haskell-driven XMPP bot
+
+Usage: tau HOST ID PASSWORD NICKNAME ROOM
+
+Available options:
+  -h,--help                Show this help text
+  HOST                     Connect host
+  ID                       Jabber ID
+  PASSWORD                 Password
+  NICKNAME                 Room nickname
+  ROOM                     Room (XMPP/Jabber name)
 ```
 
-## Installation
-`tau` depends on features not in the current `pontarius-xmpp 0.4.0.1`
-package, hence the git submodule. To install:
+You can also use this as a library to build your own custom XMPP bot.  For
+example, the above executable was written using the library, like this:
 
-1. Clone the repo + cd into the folder
-2. `git submodule init`
-3. `git submodule update`
-4. Bump the `Version` in `pontarius-xmpp.cabal` in the `pontarius-xmpp` folder to `0.4.0.2`
-5. `cabal sandbox init`
-6. `cabal sandbox add-source ./pontarius-xmpp`
-7. `cabal install --only-dependencies` (you may need to add the `--extra-include-dirs` and `--extra-lib-dirs` flags
-   to point to where you have the [ICU](http://site.icu-project.org/) library installed)
-8. `cabal build`
+```haskell
+{-# LANGUAGE OverloadedStrings #-}
 
-And you're good to go!
+import Control.Applicative ((<|>))
+import Network.Xmpp.Bot
+import Turtle (Pattern, chars, match) 
+
+parseMessage :: Pattern HintCommand
+parseMessage
+    =   fmap Eval   ("> "       *> chars)
+    <|> fmap TypeOf ("> :type " *> chars)
+
+handleMessage :: UserName -> Message -> Hint s [Message]
+handleMessage _ (Message msg) = case match parseMessage msg of
+    cmd:_ -> command cmd
+    _     -> return []
+
+main :: IO ()              
+main = do                  
+    o <- options "Haskell-driven XMPP bot" opts
+    runXmpp o () handleMessage
+```
 
 ## HipChat Instructions
 
-- HOSTNAME: `chat.hipchat.com`
-- XMPPID: `1234_1234@chat.hipchat.com/bot`
-- XMPPPASS: `password`
-- XMPPNICK: `My Name`
-- XMPPROOM: `1234_words@conf.hipchat.com`
+```
+HOST    : chat.hipchat.com
+ID      : 1234_1234@chat.hipchat.com/bot
+PASSWORD: password
+NICKNAME: My Name
+ROOM    : 1234_words@conf.hipchat.com
+```
