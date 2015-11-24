@@ -13,6 +13,7 @@ module Network.Xmpp.Bot.Hint (
     -- * Commands
       command
     , runHint
+    , liftXMPP
 
     -- * Types
     , UserName(..)
@@ -27,6 +28,8 @@ module Network.Xmpp.Bot.Hint (
 
 import Control.Concurrent.Async (Async)
 import Control.Concurrent.STM.TMVar (TMVar)
+import Control.Exception (evaluate)
+import Control.DeepSeq (($!!))
 import Control.Monad (forever)
 import Control.Monad.Catch (catch)
 import Control.Monad.Managed (Managed)
@@ -48,20 +51,13 @@ import qualified Control.Monad.State          as State
 import qualified Data.HashMap.Strict          as HashMap
 import qualified Data.Text                    as Text
 import qualified Language.Haskell.Interpreter as Hint
+import qualified Network.Protocol.XMPP        as XMPP
 import qualified System.Timeout               as Timeout
 import qualified Turtle
 
 extensions :: [Extension]
 extensions =
     [ NoMonomorphismRestriction
-    , OverloadedStrings
-    , Generics
-    , GeneralizedNewtypeDeriving
-    , DeriveDataTypeable
-    , DeriveFunctor
-    , DeriveTraversable
-    , DeriveFoldable
-    , EmptyDataDecls
     ]
 
 -- | The XMPP user that sent the message
@@ -85,9 +81,11 @@ data HintCommand
 
 -- | The internal state of the `Hint` `Monad`
 data HintState s = HintState
-    { _sessions :: HashMap UserName UserState
+    { _sessions    :: HashMap UserName UserState
     -- ^ All user sessions
-    , _custom   :: s
+    , _xmppSession :: XMPP.Session
+    -- ^ The current XMPP sessions
+    , _custom      :: s
     -- ^ Custom user-defined state
     }
 
@@ -116,18 +114,18 @@ newtype Hint s a = Hint { unHint :: StateT (HintState s) Managed a }
 
 instance MonadState s (Hint s) where
     get = Hint (do
-        HintState _ s <- get
+        HintState _ _ s <- get
         return s )
 
     put s = Hint (do
-        HintState m _ <- get
-        put (HintState m s) )
+        HintState m x _ <- get
+        put (HintState m x s) )
 
 -- | Pretty print an error message
 handler :: Monad m => InterpreterError -> m Text
 handler (UnknownError msg ) = return ("Unexpected error: "  <> Text.pack msg)
 handler (NotAllowed   msg ) = return ("Permission denied: " <> Text.pack msg)
-handler (GhcException msg ) = return ("Internal error: "    <> Text.pack msg)
+handler (GhcException msg ) = return ("GHC failure: " <> Text.pack msg)
 handler (WontCompile  msgs) = return
     (   "Compile error:\n\n"
     <>  Text.pack (unlines (map Hint.errMsg msgs))
@@ -175,16 +173,16 @@ initUser userName = Hint (do
                 Left  e -> return e
                 Right v -> v
 
-    HintState m s <- get
-    a             <- lift (Managed.managed (Async.withAsync io))
+    HintState m x s <- get
+    a               <- lift (Managed.managed (Async.withAsync io))
     let userState = UserState a cmdTMVar resTMVar
-    put (HintState (HashMap.insert userName userState m) s)
+    put (HintState (HashMap.insert userName userState m) x s)
     return userState )
 
 -- | Run an interpreter command for the given user
 command :: HintCommand -> Hint s [Message]
 command hintCommand = Hint (do
-    HintState m _                 <- get
+    HintState m _ _               <- get
     UserState a cmdTMVar resTMVar <- case HashMap.lookup userName m of
         Nothing -> unHint (initUser userName)
         Just us -> return us
@@ -204,9 +202,10 @@ command hintCommand = Hint (do
     x <- liftIO (STM.atomically writeTransaction)
     case x of
         Left  e -> do
-            Turtle.err e
+            let msg = "Interpreter thread failed: " <> Turtle.repr e
+            Turtle.err ("[!] " <> msg)
             _ <- unHint (initUser userName)
-            return []
+            return [Message msg]
         Right () -> do
             let readTransaction = do
                     y <- Async.pollSTM a
@@ -221,18 +220,22 @@ command hintCommand = Hint (do
                         -- Interpreter thread died with an `InterpreterError`
                         Just (Right e) -> do
                             return (Left (errMsg e))
-            y <- liftIO (Timeout.timeout 1000000 (STM.atomically readTransaction))
+            y <- liftIO (Timeout.timeout 1000000 (do
+                y <- STM.atomically readTransaction
+                evaluate $!! y))
             case y of
                 -- Interpreter thread took more than 1 second to compute result
                 Nothing           -> do
+                    let msg = "Resource error: 1 second time limit"
                     liftIO (Async.cancel a)
                     _ <- unHint (initUser userName)
-                    return []
+                    return [Message msg]
                 -- Interpreter thread died with an exception
                 Just (Left  e   ) -> do
-                    Turtle.err e
+                    let msg = "Internal error: " <> Turtle.repr e
+                    Turtle.err ("[!] " <> msg)
                     _ <- unHint (initUser userName)
-                    return []
+                    return [Message msg]
                 Just (Right txts) -> do
                     return (map Message txts) )
   where
@@ -254,6 +257,21 @@ command hintCommand = Hint (do
 
     If you don't use user-defined state, just supply @()@ as the starting value
 -}
-runHint :: s -> Hint s () -> IO ()
-runHint s b =
-    Managed.runManaged (State.evalStateT (unHint b) (HintState HashMap.empty s))
+runHint :: XMPP.Session -> s -> Hint s () -> IO ()
+runHint session s b =
+    Managed.runManaged
+        (State.evalStateT (unHint b) (HintState HashMap.empty session s))
+
+-- | Transform an `XMPP.XMPP` command into a `Hint` command
+liftXMPP :: XMPP.XMPP a -> Hint s a
+liftXMPP xmpp = Hint (do
+    HintState m x s <- get
+    e <- liftIO (XMPP.runXMPP x (do
+        a  <- xmpp
+        x' <- XMPP.getSession
+        return (a, x') ))
+    case e of
+        Left   exc    -> Turtle.die (Turtle.repr exc)
+        Right (a, x') -> do
+            put (HintState m x' s)
+            return a )

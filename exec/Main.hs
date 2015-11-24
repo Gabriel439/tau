@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 import Control.Applicative ((<|>))
+import Data.Monoid ((<>))
 import Network.Xmpp.Bot
 import Turtle (Pattern, chars, match)
 
@@ -11,8 +12,12 @@ parseMessage
 
 handleMessage :: UserName -> Message -> Hint s [Message]
 handleMessage _ (Message msg) = case match parseMessage msg of
-    cmd:_ -> command cmd
+    cmd:_ -> do
+        result <- command cmd
+        return (map prefix result)
     _     -> return []
+  where
+    prefix (Message txt) = Message ("⤷ " <> txt)
 
 main :: IO ()
 main = do
