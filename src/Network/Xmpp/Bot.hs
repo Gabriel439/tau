@@ -167,14 +167,14 @@ xmpp
     -> (UserName -> Message -> Hint s [Message])
     -> Hint s ()
 xmpp userJID roomJID handleMessage = do
-    liftIO (Turtle.echo  "[+] Connected successfully")
-    liftIO (Turtle.echo ("[+] Binding resource to user: " <> Turtle.repr userJID))
+    Turtle.echo  "[+] Connected successfully"
+    Turtle.echo ("[+] Binding resource to user: " <> Turtle.repr userJID)
     userJID' <- liftXMPP (XMPP.bindJID userJID)
-    liftIO (Turtle.echo ("[+] Resource bound successfully: " <> Turtle.repr userJID'))
+    Turtle.echo ("[+] Resource bound successfully: " <> Turtle.repr userJID')
 
-    liftIO (Turtle.echo ("[+] Joining room: " <> Turtle.repr roomJID))
+    Turtle.echo ("[+] Joining room: " <> Turtle.repr roomJID)
     liftXMPP (joinRoom roomJID userJID')
-    liftIO (Turtle.echo  "[+] Room joined successfully")
+    Turtle.echo  "[+] Room joined successfully"
 
     let innerLoop = do
             stanza <- liftXMPP XMPP.getStanza
