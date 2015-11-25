@@ -5,7 +5,3 @@ extra-deps:
 - stringprep-1.0.0
 - xml-picklers-0.3.6
 - pontarius-xmpp-0.4.5
-extra-lib-dirs:
-- /opt/twitter/Cellar/icu4c/55.1/lib
-extra-include-dirs:
-- /opt/twitter/Cellar/icu4c/55.1/include
