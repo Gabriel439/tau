@@ -49,8 +49,10 @@ module Network.Xmpp.Bot (
     , Text
     ) where
 
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async (concurrently)
 import Control.Exception (SomeException, catch)
-import Control.Monad (when)
+import Control.Monad (forever, when)
 import Control.Monad.Trans (MonadIO(..))
 import Data.Monoid ((<>))
 import Lens.Family (to, toListOf, view)
@@ -118,10 +120,22 @@ runXmpp (Options {..}) initialState handleMessage = do
         case x of
             Left  e       -> Turtle.die (Turtle.repr e)
             Right session -> do
-                runHint
-                    session
-                    initialState
-                    (xmpp userJID roomJID handleMessage)
+                _ <- concurrently
+                    (runHint
+                        session
+                        initialState
+                        (xmpp serverJID userJID roomJID handleMessage) )
+                    (keepAlive session serverJID userJID)
+                return ()
+
+keepAlive :: XMPP.Session -> XMPP.JID -> XMPP.JID -> IO ()
+keepAlive session serverJID userJID = do
+    x <- XMPP.runXMPP session (forever (do
+        sendKeepAlive serverJID userJID
+        liftIO (threadDelay 60000000) ))
+    case x of
+        Left  e -> Turtle.die ("Keep-alive thread died: " <> Turtle.repr e)
+        Right v -> v
 
 joinRoom :: XMPP.JID -> XMPP.JID -> XMPP.XMPP ()
 joinRoom roomJID userJID' = XMPP.putStanza (XMPP.Presence
@@ -161,12 +175,33 @@ sayRoom roomJID userJID' txt =
             ]
         } )
 
+-- Section 4.2 of XEP-0199
+sendKeepAlive :: XMPP.JID -> XMPP.JID -> XMPP.XMPP ()
+sendKeepAlive userJID' serverJID = do
+    XMPP.putStanza (XMPP.IQ
+        { XMPP.iqType    = XMPP.IQGet
+        , XMPP.iqFrom    = Just userJID'
+        , XMPP.iqTo      = Just serverJID
+        , XMPP.iqID      = Nothing
+        , XMPP.iqLang    = Nothing
+        , XMPP.iqPayload = Just (XML.Element
+            { XML.elementName       = XML.Name
+                { XML.nameLocalName = "ping"
+                , XML.nameNamespace = Just "urn:xmpp:ping"
+                , XML.namePrefix    = Nothing
+                }
+            , XML.elementAttributes = []
+            , XML.elementNodes      = []
+            })
+        } )
+
 xmpp
     :: XMPP.JID
     -> XMPP.JID
+    -> XMPP.JID
     -> (UserName -> Message -> Hint s [Message])
     -> Hint s ()
-xmpp userJID roomJID handleMessage = do
+xmpp serverJID userJID roomJID handleMessage = do
     Turtle.echo  "[+] Connected successfully"
     Turtle.echo ("[+] Binding resource to user: " <> Turtle.repr userJID)
     userJID' <- liftXMPP (XMPP.bindJID userJID)
